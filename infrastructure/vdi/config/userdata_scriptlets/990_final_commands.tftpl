@@ -1,0 +1,7 @@
+echo ""
+echo "######################################################"
+echo "Running final commands at: `date --iso-8601=minutes`"
+echo "######################################################"
+
+sudo systemctl isolate multi-user.target && sudo systemctl isolate graphical.target
+sudo systemctl stop dcvserver && sudo systemctl start dcvserver

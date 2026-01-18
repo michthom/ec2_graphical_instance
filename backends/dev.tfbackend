@@ -1,0 +1,4 @@
+    bucket = "tf-state-50825810"
+    region = "eu-west-2"
+    use_lockfile = true
+    encrypt = true

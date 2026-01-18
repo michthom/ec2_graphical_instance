@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Secure Terraform remote state S3 bucket with access logging, versioning, backups, and TLS enforcement
+
+Parameters:
+  BucketNamePrefix:
+    Type: String
+    Description: Prefix for the Terraform state bucket name
+    MinLength: 3
+    # Allow for programmatic suffix within overall limit (63)
+    MaxLength: 50
+    Default: tf-state
+    # # AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+    # ConstraintDescription: >
+    #   Must be 3–50 characters, lowercase letters, numbers, or hyphens,
+    #   and start and end with a letter or number.
+  AccessLoggingBucketName:
+    Type: String
+    Description: Existing S3 bucket name where access logs will be delivered
+    MinLength: 3
+    MaxLength: 63
+    Default: access-logging
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+    ConstraintDescription: >
+      Must be 3-63 characters, lowercase letters, numbers, or hyphens,
+      and start and end with a letter or number.
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub
+        - "${Prefix}-${Suffix}"
+        - Prefix: !Ref BucketNamePrefix
+          Suffix: !Select
+            - 0
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Ref AWS::StackId
+      VersioningConfiguration:
+        Status: Enabled
+      # N.B. MFA Delete can NOT be enabled via CloudFormation
+      # so after the bucket is created, it should be manually
+      # added to ensure versioning is not disabled, and to
+      # prevent deletion of file versions.
+      # Alternatively, ensure that an SCP prevents access to
+      # s3:DeleteObjectVersion for all barring root / break
+      # glass role(s).
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLoggingBucketName
+        LogFilePrefix: terraform-state/
+      Tags:
+        - Key: Purpose
+          Value: TerraformRemoteState
+
+  TerraformStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TerraformStateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Require HTTPS
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${TerraformStateBucket.Arn}"
+              - !Sub "${TerraformStateBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+          # Enforce TLS 1.2+
+          - Sid: DenyOldTLS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${TerraformStateBucket.Arn}"
+              - !Sub "${TerraformStateBucket.Arn}/*"
+            Condition:
+              NumericLessThan:
+                s3:TlsVersion: 1.2
+              Bool:
+                aws:ViaAWSService: false
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    # Protect backups even from stack deletion
+    DeletionPolicy: Retain
+    # Protect backups during replacement or name changes
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: !Sub
+        - "${Prefix}-${Suffix}"
+        - Prefix: !Ref BucketNamePrefix
+          Suffix: !Select
+            - 0
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Ref AWS::StackId
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub
+          - "${Prefix}-${Suffix}"
+          - Prefix: !Ref BucketNamePrefix
+            Suffix: !Select
+              - 0
+              - !Split
+                - "-"
+                - !Select
+                  - 2
+                  - !Split
+                    - "/"
+                    - !Ref AWS::StackId
+        BackupPlanRule:
+          - RuleName: DailyBackups
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 5 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              DeleteAfterDays: 35
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub
+        - "${Prefix}-${Suffix}"
+        - Prefix: !Ref BucketNamePrefix
+          Suffix: !Select
+            - 0
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Ref AWS::StackId
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: terraform-state-selection
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          - !Sub "${TerraformStateBucket.Arn}"
+
+Outputs:
+  StateBucketName:
+    Description: Terraform remote state bucket name
+    Value: !Ref TerraformStateBucket

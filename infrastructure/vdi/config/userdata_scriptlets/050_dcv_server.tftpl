@@ -1,0 +1,42 @@
+echo ""
+echo "######################################################"
+echo "Installing DCV Server at: `date --iso-8601=minutes`"
+echo "######################################################"
+
+# From https://repost.aws/articles/AR4Nbl3SxTSIW3WpFSUJhzXg/install-gui-graphical-desktop-on-amazon-ec2-instances-running-rhel-rocky-linux-8-9
+
+cd /tmp
+sudo rpm --import https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+
+OS_VERSION=$(. /etc/os-release;echo $VERSION_ID | sed -e 's/\..*//g')
+curl -L -O https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-el$OS_VERSION-$(arch).tgz
+
+tar -xvzf nice-dcv-el$OS_VERSION-$(arch).tgz && cd nice-dcv-*-el$OS_VERSION-$(arch)
+
+sudo dnf install -y ./nice-dcv-server-*.rpm
+sudo dnf install -y ./nice-dcv-web-viewer-*.rpm
+sudo dnf install -y ./nice-xdcv-*.rpm
+
+usermod -G video dcv
+
+useradd \
+    --create-home \
+    --groups video \
+    --comment "DCV user to access graphical desktop" \
+    --shell /bin/bash \
+    ${DCV_USER_NAME}
+
+DCV_USER_PASSWORD=$(/usr/local/bin/aws secretsmanager get-secret-value \
+    --secret-id "${DCV_PASSWORD_ID}" \
+    --query SecretString \
+    --output text
+)
+
+# Set password for the new DCV user
+echo "$DCV_USER_PASSWORD" | passwd --stdin ${DCV_USER_NAME}
+
+sudo sed -i "/^\[session-management\/automatic-console-session/a owner=\"${DCV_USER_NAME}\"\nstorage-root=\"%home%\"" /etc/dcv/dcv.conf
+sudo sed -i "s/^#create-session/create-session/g" /etc/dcv/dcv.conf
+
+# Wait to start after reboot
+systemctl enable dcvserver

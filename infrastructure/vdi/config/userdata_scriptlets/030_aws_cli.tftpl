@@ -1,0 +1,18 @@
+echo ""
+echo "######################################################"
+echo "Installling AWS CLI at: `date --iso-8601=minutes`"
+echo "######################################################"
+
+# Install AWS CLI
+# https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+
+dnf -y install unzip
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+
+./aws/install
+
+/usr/local/bin/aws --version
+
+echo exclude=awscli2 >> /etc/dnf/dnf.conf

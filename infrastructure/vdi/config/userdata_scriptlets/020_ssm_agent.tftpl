@@ -1,0 +1,19 @@
+echo ""
+echo "######################################################"
+echo "Installling SSM Agent at: `date --iso-8601=minutes`"
+echo "######################################################"
+
+# Install and start SSM agent for Rocky Linux x86_64 / amd64 architecture in eu-west-2
+# https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-rocky.html
+# https://repost.aws/articles/AR4Nbl3SxTSIW3WpFSUJhzXg/install-gui-graphical-desktop-on-amazon-ec2-instances-running-rhel-rocky-linux-8-9
+
+if (! systemctl list-units | grep -q amazon-ssm-agent); then
+  if (arch | grep -q x86); then
+    sudo dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+  else
+    sudo dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_arm64/amazon-ssm-agent.rpm
+  fi
+fi
+
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
