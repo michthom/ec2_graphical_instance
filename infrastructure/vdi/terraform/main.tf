@@ -70,7 +70,7 @@ module "dcv_user_password_access_policy" {
         {
             "Effect": "Allow",
             "Action": "secretsmanager:GetSecretValue",
-            "Resource": "${aws_secretsmanager_secret.dcv_user_pw_secret.id}"
+            "Resource": "${module.canary_instance_pw.password_secret_id}"
         }
       ]
     }
@@ -81,19 +81,10 @@ module "dcv_user_password_access_policy" {
   })
 }
 
-# DCV User password
+module "canary_instance_pw" {
+  source      = "../../..//modules/randomised_password_secret"
+  secret_name = "canary_instance/dcv_user_password"
 
-resource "random_password" "password" {
-  length           = 12
-  special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
-}
-resource "aws_secretsmanager_secret" "dcv_user_pw_secret" {
-  name_prefix = "vdi/dcv_user_password"
-}
-resource "aws_secretsmanager_secret_version" "dcv_user_pw_version" {
-  secret_id     = aws_secretsmanager_secret.dcv_user_pw_secret.id
-  secret_string = random_password.password.result
 }
 
 module "canary_instance_userdata" {
@@ -115,7 +106,7 @@ module "canary_instance_userdata" {
 
   template_vars = {
     DCV_USER_NAME   = "dcv-user"
-    DCV_PASSWORD_ID = aws_secretsmanager_secret.dcv_user_pw_secret.id
+    DCV_PASSWORD_ID = module.canary_instance_pw.password_secret_id
   }
 }
 
@@ -167,6 +158,11 @@ module "canary_instance" {
 }
 
 
+module "vdi_instance_pw" {
+  source          = "../../..//modules/randomised_password_secret"
+  secret_name     = "vdi_instance/dcv_user_password"
+  password_length = 16
+}
 
 module "vdi_instance_userdata" {
   source = "../../..//modules/concatenate_templates"
@@ -186,7 +182,7 @@ module "vdi_instance_userdata" {
 
   template_vars = {
     DCV_USER_NAME   = "dcv-user"
-    DCV_PASSWORD_ID = aws_secretsmanager_secret.dcv_user_pw_secret.id
+    DCV_PASSWORD_ID = module.vdi_instance_pw.password_secret_id
   }
 }
 
